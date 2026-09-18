@@ -1314,6 +1314,15 @@ defmodule Ecto.Adapters.TdsTest do
     assert query == ~s{DELETE FROM [prefix].[schema] WHERE [x] = @1 AND [y] = @2}
   end
 
+  # Repo.update/2 and Repo.delete/2 pass filters as dumped by the adapter
+  test "update and delete filter a tagged nil with IS NULL" do
+    query = update(nil, "schema", [:x], [{:id, 1}, {:y, {nil, :date}}], [])
+    assert query == ~s{UPDATE [schema] SET [x] = @1 WHERE [id] = @2 AND [y] IS NULL}
+
+    query = delete(nil, "schema", [{:id, 1}, {:y, {nil, :datetimeoffset}}], [])
+    assert query == ~s{DELETE FROM [schema] WHERE [id] = @1 AND [y] IS NULL}
+  end
+
   ## Values List
 
   test "values list: all" do
@@ -2118,6 +2127,44 @@ defmodule Ecto.Adapters.TdsTest do
         SQL.prepare_params([%Tds.Parameter{name: "Param"}])
       end
     end
+
+    test "prepares a dumped nil with the type of a value of the same field" do
+      values = [
+        date: ~D[2024-01-01],
+        time: ~T[09:30:00],
+        time_usec: ~T[09:30:00.000001],
+        naive_datetime: ~N[2024-01-01 09:30:00],
+        naive_datetime_usec: ~N[2024-01-01 09:30:00.000001],
+        utc_datetime: ~U[2024-01-01 09:30:00Z],
+        utc_datetime_usec: ~U[2024-01-01 09:30:00.000001Z],
+        float: 1.5
+      ]
+
+      nil_types = for {type, _value} <- values, do: {type, prepared_type(type, nil)}
+      value_types = for {type, value} <- values, do: {type, prepared_type(type, value)}
+
+      # prepare_params/1 leaves a float value for the driver to type as :float
+      assert value_types[:float] == nil
+      assert nil_types == Keyword.replace!(value_types, :float, :float)
+    end
+
+    test "numbers a tagged nil param in sequence" do
+      assert SQL.prepare_params([1, {nil, :date}, "a"]) == [
+               %Tds.Parameter{name: "@1", value: 1},
+               %Tds.Parameter{name: "@2", value: nil, type: :date},
+               %Tds.Parameter{name: "@3", value: "a", type: :string}
+             ]
+    end
+
+    test "prepares a bare nil param without a type" do
+      assert SQL.prepare_params([nil]) == [%Tds.Parameter{name: "@1", value: nil, type: nil}]
+    end
+  end
+
+  defp prepared_type(type, value) do
+    {:ok, dumped} = Ecto.Type.adapter_dump(Ecto.Adapters.Tds, type, value)
+    [%Tds.Parameter{type: param_type}] = SQL.prepare_params([dumped])
+    param_type
   end
 
   defp remove_newlines(string) when is_binary(string) do
