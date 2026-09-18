@@ -143,6 +143,13 @@ if Code.ensure_loaded?(Tds) do
     defp prepare_raw_param(value) when value == true, do: {1, :boolean}
     defp prepare_raw_param(value) when value == false, do: {0, :boolean}
     defp prepare_raw_param({_, :varchar} = value), do: value
+
+    # A nil that Ecto.Adapters.Tds.dumpers/2 paired with its TDS type. The
+    # list is the set of values of @tagged_nil_types there.
+    defp prepare_raw_param({nil, type} = value)
+         when type in [:date, :time, :datetime2, :datetimeoffset, :float],
+         do: value
+
     defp prepare_raw_param(value), do: {value, nil}
 
     defp json_library(), do: Application.get_env(:tds, :json_library, Jason)
@@ -291,6 +298,10 @@ if Code.ensure_loaded?(Tds) do
           {field, nil}, acc ->
             {[quote_name(field), " IS NULL"], acc + 1}
 
+          # A nil that Ecto.Adapters.Tds.dumpers/2 paired with its TDS type
+          {field, {nil, _type}}, acc ->
+            {[quote_name(field), " IS NULL"], acc + 1}
+
           {field, _value}, acc ->
             {[quote_name(field), " = @", Integer.to_string(acc)], acc + 1}
 
@@ -313,6 +324,10 @@ if Code.ensure_loaded?(Tds) do
       {filters, _} =
         intersperse_reduce(filters, " AND ", 1, fn
           {field, nil}, acc ->
+            {[quote_name(field), " IS NULL"], acc + 1}
+
+          # A nil that Ecto.Adapters.Tds.dumpers/2 paired with its TDS type
+          {field, {nil, _type}}, acc ->
             {[quote_name(field), " IS NULL"], acc + 1}
 
           {field, _value}, acc ->

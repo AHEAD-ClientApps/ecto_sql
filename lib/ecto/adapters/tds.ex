@@ -151,10 +151,33 @@ defmodule Ecto.Adapters.Tds do
   def loaders(:binary_id, type), do: [Tds.Ecto.UUID, type]
   def loaders(_, type), do: [type]
 
+  # The TDS type a nil of these built-in types is sent as. An untyped nil is
+  # declared as varbinary, which date, time, datetime2, datetimeoffset, float
+  # and real columns refuse, so tag_nil/2 pairs it with the type a non-nil
+  # value of the field gets, and the connection passes the pair on like
+  # {value, :varchar}. It holds only atoms, so this module still compiles
+  # without tds. Custom types aren't tagged: Ecto never calls their dump/1 for
+  # nil, so how they store values is unknown. :string is left alone on purpose
+  # (elixir-ecto/tds#162).
+  @tagged_nil_types %{
+    date: :date,
+    time: :time,
+    time_usec: :time,
+    naive_datetime: :datetime2,
+    naive_datetime_usec: :datetime2,
+    utc_datetime: :datetimeoffset,
+    utc_datetime_usec: :datetimeoffset,
+    float: :float
+  }
+
   @impl true
   def dumpers({:map, _}, type), do: [&Ecto.Type.embedded_dump(type, &1, :json)]
   def dumpers(:binary_id, type), do: [type, Tds.Ecto.UUID]
+  def dumpers(type, type) when is_map_key(@tagged_nil_types, type), do: [type, &tag_nil(&1, type)]
   def dumpers(_, type), do: [type]
+
+  defp tag_nil(nil, type), do: {:ok, {nil, Map.fetch!(@tagged_nil_types, type)}}
+  defp tag_nil(value, _type), do: {:ok, value}
 
   defp bool_decode(<<0>>), do: {:ok, false}
   defp bool_decode(<<1>>), do: {:ok, true}
